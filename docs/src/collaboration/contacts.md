@@ -3,28 +3,16 @@
 In addition to [channels](./channels.md), Zed allows you to have private calls / collaboration sessions with those in your contacts.
 These calls can be one-on-ones or contain any number of users from your contacts.
 
+In Zed, all collaboration happens in the collaboration panel, which can be opened via {#kb collab_panel::ToggleFocus} or `collab panel: toggle focus` from the command palette.
+You will need to [sign in](../../authentication.md#signing-in) in order to access features within the collaboration panel.
+
 ## Adding a contact
 
 1. Click the `+` button to the right of the `Contacts` section to `Search for new contact`.
-1. Search for the contact you want to add using their GitHub handle. Note: the person you are trying to add as a contact must be an existing Zed user.
-
-### Inviting a collaborator
-
-You can add an existing Zed user as a contact from the contacts menu, deployed from the `Show contacts menu` button in the upper right-hand corner of the window or by `collab: toggle contacts menu` (`cmd-shift-c`) and then clicking the `Search for new contact` button to the right of the search box.
-
-![Inviting a collaborator to the current project](https://zed.dev/img/collaboration/add-a-collaborator.png)
-
-When you invite a collaborator to a project not in a call they will receive a notification to join, and a new call is created.
-
-![Receiving an invite to join a call](https://zed.dev/img/collaboration/receiving-an-invite.jpg)
-
-### Inviting non-Zed users
-
-If someone you want to collaborate with has not yet signed up for Zed, they will need to [download the app](https://zed.dev/download) and sign in for the first time before you can add them. Identity is tied to GitHub accounts, so new users will need to authenticate with GitHub in order to sign into Zed.
-
-### Voice chat
-
-When joining a call, Zed will automatically share your microphone with other users in the call, if your OS allows it. This isn't tied to your project. You can disable this for your client via the [`mute_on_join`](../configuring-zed.md#calls) setting.
+1. Search for the contact you want to add using their GitHub handle.
+   _Note: The contact you're adding must be an existing Zed user who has completed the GitHub authentication sign-in flow._
+1. Your contact will receive a notification of your request.
+   Once they accept, you'll both appear in each other's `Contacts` list.
 
 ## Collaborating on a project
 

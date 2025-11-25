@@ -7,6 +7,9 @@ Channels provide a way to streamline collaborating for software engineers in man
 - Refactoring – you can have multiple people join in on large refactoring without fear of conflict.
 - Ambient awareness – you can see what everyone else is working on with no need for status emails or meetings.
 
+In Zed, all collaboration happens in the collaboration panel, which can be opened via {#kb collab_panel::ToggleFocus} or `collab panel: toggle focus` from the command palette.
+You will need to [sign in](../../authentication.md#signing-in) in order to access features within the collaboration panel.
+
 ## Channels
 
 Open the collaboration panel via {#kb collab_panel::ToggleFocus} or `collab panel: toggle focus` from the command palette.
@@ -16,6 +19,10 @@ Each channel corresponds to an ongoing project or work-stream. You can see who�
 You can create as many channels as you need. As in the example above, you can mix channels for your day job, as well as side-projects in one instance of Zed.
 
 Joining a channel adds you to a shared room where you can work on projects together.
+
+### Voice chat
+
+When joining a channel, Zed will automatically share your microphone, if your OS allows it. This isn't tied to your project. You can disable this for your client via the [`mute_on_join`](../configuring-zed.md#calls) setting.
 
 ## Sharing projects
 

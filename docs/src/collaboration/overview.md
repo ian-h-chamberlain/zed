@@ -3,14 +3,9 @@
 At Zed, we believe that great things are built by great people working together.
 We have designed Zed to help individuals work faster and help teams of people work together more effectively.
 
-In Zed, all collaboration happens in the collaboration panel, which can be opened via {#kb collab_panel::ToggleFocus} or `collab panel: toggle focus` from the command palette.
-You will need to [sign in](../../authentication.md#signing-in) in order to access features within the collaboration panel.
+All collaboration happens in the collaboration panel and is generally broken down into two categories:
 
-## Collaboration panel
-
-The collaboration panel is broken down into two sections:
-
-1. [Channels](./channels.md): Ongoing project rooms where team members can share projects, collaborate on code, and maintain ambient awareness of what everyone is working on.
+1. [Channels](./channels.md): Ongoing rooms where team members can share projects, collaborate on code, and maintain ambient awareness of what everyone is working on.
 1. [Contacts](./contacts.md): Your list of personal contacts with whom you can start ad-hoc private collaboration sessions.
 
 ---
