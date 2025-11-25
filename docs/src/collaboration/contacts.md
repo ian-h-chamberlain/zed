@@ -1,23 +1,12 @@
-# Contacts and Private Calls
+# Contacts
 
 In addition to [channels](./channels.md), Zed allows you to have private calls / collaboration sessions with those in your contacts.
 These calls can be one-on-ones or contain any number of users from your contacts.
 
-*You will need to [sign in](../../authentication.md#signing-in) in order to begin using Zed's collaboration features.*
-
-
 ## Adding a contact
 
-Open the collaboration panel via {#kb collab_panel::ToggleFocus} or `collab panel: toggle focus` from the command palette.
-
-
-## Adding a collaborator to a call
-
-Before you can collaborate, you'll need to add a collaborator to your contacts. To do this:
-
-1. Open the contacts menu by clicking on the `Show contacts menu` button in the upper right-hand corner of the window or by running `collab: toggle contacts menu` (`cmd-shift-c`).
-2. Click the add button to the right of the search box.
-3. Search for the contact you want to add using their GitHub handle. Note: the person you are trying to add as a contact must be an existing Zed user.
+1. Click the `+` button to the right of the `Contacts` section to `Search for new contact`.
+1. Search for the contact you want to add using their GitHub handle. Note: the person you are trying to add as a contact must be an existing Zed user.
 
 ### Inviting a collaborator
 

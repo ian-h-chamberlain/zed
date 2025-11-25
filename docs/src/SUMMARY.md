@@ -36,7 +36,7 @@
 - [Code Completions](./completions.md)
 - [Collaboration](./collaboration/overview.md)
   - [Channels](./collaboration/channels.md)
-  - [Contacts and Private Calls](./collaboration/contacts-and-private-calls.md)
+  - [Contacts](./collaboration/contacts.md)
 - [Git](./git.md)
 - [Debugger](./debugger.md)
 - [Diagnostics](./diagnostics.md)
