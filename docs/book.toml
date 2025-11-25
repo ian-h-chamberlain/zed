@@ -57,8 +57,7 @@ enable = false
 "/ai/temperature.html" = "/docs/ai/agent-settings.html#model-temperature"
 
 # Collaboration
-"/channels.html" = "/docs/collaboration/channels.html"
-"/collaboration.html" = "/docs/collaboration/overview.html"
+"/channels.html" = "/docs/collaboration.html"
 
 # Community
 "/community/feedback.html" = "/community-links"
