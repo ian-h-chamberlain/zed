@@ -1,0 +1,9 @@
+# NOTE: this `name` is used match the (#set! injection.language "..."), *not*
+# the directory name or the grammar name.
+name = "Rust-Format-Args"
+grammar = "rust-format-args"
+autoclose_before = "}"
+brackets = [
+    { start = "{", end = "}", close = true, newline = false },
+]
+hidden = true

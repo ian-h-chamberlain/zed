@@ -76,6 +76,7 @@ pub fn init(languages: Arc<LanguageRegistry>, fs: Arc<dyn Fs>, node: NodeRuntime
         ("markdown-inline", tree_sitter_md::INLINE_LANGUAGE),
         ("python", tree_sitter_python::LANGUAGE),
         ("regex", tree_sitter_regex::LANGUAGE),
+        ("rust-format-args", tree_sitter_rust_format_args::LANGUAGE),
         ("rust", tree_sitter_rust::LANGUAGE),
         ("tsx", tree_sitter_typescript::LANGUAGE_TSX),
         ("typescript", tree_sitter_typescript::LANGUAGE_TYPESCRIPT),
@@ -187,6 +188,10 @@ pub fn init(languages: Arc<LanguageRegistry>, fs: Arc<dyn Fs>, node: NodeRuntime
             adapters: vec![rust_lsp_adapter],
             context: Some(rust_context_provider),
             manifest_name: Some(SharedString::new_static("Cargo.toml").into()),
+            ..Default::default()
+        },
+        LanguageInfo {
+            name: "rust-format-args",
             ..Default::default()
         },
         LanguageInfo {

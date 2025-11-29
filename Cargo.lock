@@ -9063,6 +9063,7 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-regex",
  "tree-sitter-rust",
+ "tree-sitter-rust-format-args",
  "tree-sitter-typescript",
  "tree-sitter-yaml",
  "unindent",
@@ -18191,6 +18192,15 @@ name = "tree-sitter-rust"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b9b18034c684a2420722be8b2a91c9c44f2546b631c039edf575ccba8c61be1"
+dependencies = [
+ "cc",
+ "tree-sitter-language",
+]
+
+[[package]]
+name = "tree-sitter-rust-format-args"
+version = "0.1.0"
+source = "git+https://github.com/nik-rev/tree-sitter-rust-format-args.git?rev=3cf8431a4951656bcf24ae06689fbd094fce0187#3cf8431a4951656bcf24ae06689fbd094fce0187"
 dependencies = [
  "cc",
  "tree-sitter-language",
