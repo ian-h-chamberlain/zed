@@ -9,6 +9,7 @@
   // - "system": Use the theme that corresponds to the system's appearance
   // - "light": Use the theme indicated by the "light" field
   // - "dark": Use the theme indicated by the "dark" field
+  //
   "theme": {
     "mode": "system",
     "light": "One Light",
