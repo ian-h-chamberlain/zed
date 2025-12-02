@@ -30,7 +30,7 @@ use fs::Fs;
 use gpui::BorrowAppContext;
 use gpui::Global;
 use gpui::{
-    App, AssetSource, HighlightStyle, Hsla, Pixels, Refineable, SharedString, WindowAppearance,
+    App, AssetSource, Hsla, Pixels, Refineable, SharedString, WindowAppearance,
     WindowBackgroundAppearance, px,
 };
 use serde::Deserialize;
@@ -254,19 +254,7 @@ impl ThemeFamily {
             .map(|(syntax_token, highlight)| {
                 (
                     syntax_token.clone(),
-                    HighlightStyle {
-                        color: highlight
-                            .color
-                            .as_ref()
-                            .and_then(|color| try_parse_color(color).ok()),
-                        background_color: highlight
-                            .background_color
-                            .as_ref()
-                            .and_then(|color| try_parse_color(color).ok()),
-                        font_style: highlight.font_style.map(Into::into),
-                        font_weight: highlight.font_weight.map(Into::into),
-                        ..Default::default()
-                    },
+                    highlight_style_from_settings(highlight),
                 )
             })
             .collect::<Vec<_>>();

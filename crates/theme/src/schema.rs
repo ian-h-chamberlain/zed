@@ -1,9 +1,10 @@
 #![allow(missing_docs)]
 
-use gpui::{FontStyle, FontWeight, HighlightStyle, Hsla};
+use gpui::{HighlightStyle, Hsla};
 use palette::FromColor;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use settings::HighlightStyleContent;
 pub use settings::{FontWeightContent, WindowBackgroundContent};
 
 use crate::{StatusColorsRefinement, ThemeColorsRefinement};
@@ -51,25 +52,26 @@ pub struct ThemeContent {
 pub fn syntax_overrides(this: &settings::ThemeStyleContent) -> Vec<(String, HighlightStyle)> {
     this.syntax
         .iter()
-        .map(|(key, style)| {
-            (
-                key.clone(),
-                HighlightStyle {
-                    color: style
-                        .color
-                        .as_ref()
-                        .and_then(|color| try_parse_color(color).ok()),
-                    background_color: style
-                        .background_color
-                        .as_ref()
-                        .and_then(|color| try_parse_color(color).ok()),
-                    font_style: style.font_style.map(FontStyle::from),
-                    font_weight: style.font_weight.map(FontWeight::from),
-                    ..Default::default()
-                },
-            )
-        })
+        .map(|(key, style)| (key.clone(), highlight_style_from_settings(style)))
         .collect()
+}
+
+pub(crate) fn highlight_style_from_settings(style: &HighlightStyleContent) -> HighlightStyle {
+    HighlightStyle {
+        color: style
+            .color
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        background_color: style
+            .background_color
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        font_style: style.font_style.map(Into::into),
+        font_weight: style.font_weight.map(Into::into),
+        underline: style.underline.map(Into::into),
+        strikethrough: style.strikethrough.map(Into::into),
+        ..Default::default()
+    }
 }
 
 pub fn status_colors_refinement(colors: &settings::StatusColorsContent) -> StatusColorsRefinement {

@@ -3,7 +3,8 @@ use collections::IndexMap;
 use strum::IntoEnumIterator;
 use theme::{
     FontStyleContent, FontWeightContent, HighlightStyleContent, StatusColorsContent,
-    ThemeColorsContent, ThemeContent, ThemeStyleContent, WindowBackgroundContent,
+    StrikethroughStyleContent, ThemeColorsContent, ThemeContent, ThemeStyleContent,
+    UnderlineStyleContent, WindowBackgroundContent,
 };
 
 use crate::ThemeMetadata;
@@ -24,6 +25,18 @@ pub(crate) fn try_parse_font_style(font_style: &str) -> Option<FontStyleContent>
         style if style.contains("oblique") => Some(FontStyleContent::Oblique),
         _ => None,
     }
+}
+
+pub(crate) fn try_parse_underline_style(font_style: &str) -> Option<UnderlineStyleContent> {
+    style
+        .contains("underline")
+        .then_some(UnderlineStyleContent::Single)
+}
+
+pub(crate) fn try_parse_strikethrough_style(font_style: &str) -> Option<StrikethroughStyleContent> {
+    style
+        .contains("strikethrough")
+        .then_some(StrikethroughStyleContent::Single)
 }
 
 pub struct VsCodeThemeConverter {
@@ -262,6 +275,16 @@ impl VsCodeThemeConverter {
                     .font_style
                     .as_ref()
                     .and_then(|style| try_parse_font_weight(style)),
+                underline: token_color
+                    .settings
+                    .font_style
+                    .as_ref()
+                    .and_then(|style| try_parse_underline_style(style)),
+                strikethrough: token_color
+                    .settings
+                    .font_style
+                    .as_ref()
+                    .and_then(|style| try_parse_strikethrough_style(style)),
             };
 
             if highlight_style.is_empty() {

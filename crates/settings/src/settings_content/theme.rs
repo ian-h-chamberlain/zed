@@ -1,5 +1,8 @@
 use collections::{HashMap, IndexMap};
-use gpui::{FontFallbacks, FontFeatures, FontStyle, FontWeight, SharedString};
+use gpui::{
+    FontFallbacks, FontFeatures, FontStyle, FontWeight, Pixels, SharedString, StrikethroughStyle,
+    UnderlineStyle,
+};
 use schemars::{JsonSchema, JsonSchema_repr};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -929,6 +932,18 @@ pub struct HighlightStyleContent {
         deserialize_with = "treat_error_as_none"
     )]
     pub font_weight: Option<FontWeightContent>,
+
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "treat_error_as_none"
+    )]
+    pub underline: Option<UnderlineStyleContent>,
+
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "treat_error_as_none"
+    )]
+    pub strikethrough: Option<StrikethroughStyleContent>,
 }
 
 impl HighlightStyleContent {
@@ -937,6 +952,8 @@ impl HighlightStyleContent {
             && self.background_color.is_none()
             && self.font_style.is_none()
             && self.font_weight.is_none()
+            && self.underline.is_none()
+            && self.strikethrough.is_none()
     }
 }
 
@@ -1160,6 +1177,47 @@ impl From<FontWeightContent> for FontWeight {
             FontWeightContent::Bold => FontWeight::BOLD,
             FontWeightContent::ExtraBold => FontWeight::EXTRA_BOLD,
             FontWeightContent::Black => FontWeight::BLACK,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, MergeFrom, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum UnderlineStyleContent {
+    Straight,
+    Wavy,
+}
+
+impl From<UnderlineStyleContent> for UnderlineStyle {
+    fn from(value: UnderlineStyleContent) -> Self {
+        match value {
+            UnderlineStyleContent::Straight => Self {
+                wavy: false,
+                thickness: Pixels::from(1.0),
+                color: None,
+            },
+            UnderlineStyleContent::Wavy => Self {
+                wavy: true,
+                thickness: Pixels::from(1.0),
+                color: None,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, MergeFrom, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum StrikethroughStyleContent {
+    Single,
+}
+
+impl From<StrikethroughStyleContent> for StrikethroughStyle {
+    fn from(value: StrikethroughStyleContent) -> Self {
+        match value {
+            StrikethroughStyleContent::Single => Self {
+                thickness: Pixels::from(1.0),
+                color: None,
+            },
         }
     }
 }
