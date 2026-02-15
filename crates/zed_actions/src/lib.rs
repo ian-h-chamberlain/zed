@@ -267,7 +267,10 @@ pub mod git {
             /// Opens the git worktree selector.
             Worktree,
             /// Creates a pull request for the current branch.
-            CreatePullRequest
+            CreatePullRequest,
+            /// Opens the current diff/patch file in a diff view.
+            // TODO: move out of git namepsace and view probably
+            PatchFileDiff
         ]
     );
 }

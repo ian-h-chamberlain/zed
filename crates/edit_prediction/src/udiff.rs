@@ -394,7 +394,7 @@ struct PatchFile<'a> {
     new_path: Cow<'a, str>,
 }
 
-struct DiffParser<'a> {
+pub struct DiffParser<'a> {
     current_file: Option<PatchFile<'a>>,
     current_line: Option<(&'a str, DiffLine<'a>)>,
     hunk: Hunk,
@@ -414,7 +414,7 @@ enum LastDiffOp {
 }
 
 #[derive(Debug, PartialEq)]
-enum DiffEvent<'a> {
+pub enum DiffEvent<'a> {
     Hunk {
         path: Cow<'a, str>,
         hunk: Hunk,
@@ -426,17 +426,17 @@ enum DiffEvent<'a> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum FileStatus {
+pub enum FileStatus {
     Created,
     Modified,
     Deleted,
 }
 
 #[derive(Debug, Default, PartialEq)]
-struct Hunk {
-    context: String,
-    edits: Vec<Edit>,
-    start_line: Option<u32>,
+pub struct Hunk {
+    pub context: String,
+    pub edits: Vec<Edit>,
+    pub start_line: Option<u32>,
 }
 
 impl Hunk {
@@ -446,13 +446,13 @@ impl Hunk {
 }
 
 #[derive(Debug, PartialEq)]
-struct Edit {
-    range: Range<usize>,
-    text: String,
+pub struct Edit {
+    pub range: Range<usize>,
+    pub text: String,
 }
 
 impl<'a> DiffParser<'a> {
-    fn new(diff: &'a str) -> Self {
+    pub fn new(diff: &'a str) -> Self {
         let mut diff = diff.lines();
         let current_line = diff.next().map(|line| (line, DiffLine::parse(line)));
         DiffParser {
@@ -466,7 +466,7 @@ impl<'a> DiffParser<'a> {
         }
     }
 
-    fn next(&mut self) -> Result<Option<DiffEvent<'a>>> {
+    pub fn next(&mut self) -> Result<Option<DiffEvent<'a>>> {
         loop {
             let (hunk_done, file_done) = match self.current_line.as_ref().map(|e| &e.1) {
                 Some(DiffLine::OldPath { .. }) | Some(DiffLine::Garbage(_)) | None => (true, true),

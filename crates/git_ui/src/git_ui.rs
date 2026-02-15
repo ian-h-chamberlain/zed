@@ -45,6 +45,7 @@ mod git_panel_settings;
 pub mod git_picker;
 pub mod multi_diff_view;
 pub mod onboarding;
+pub mod patch_diff;
 pub mod picker_prompt;
 pub mod project_diff;
 pub(crate) mod remote_output;
@@ -75,6 +76,7 @@ pub fn init(cx: &mut App) {
         ProjectDiff::register(workspace, cx);
         CommitModal::register(workspace);
         git_panel::register(workspace);
+        patch_diff::register(workspace, cx);
         repository_selector::register(workspace);
         git_picker::register(workspace);
 

@@ -7203,6 +7203,7 @@ dependencies = [
  "component",
  "ctor",
  "db",
+ "edit_prediction",
  "editor",
  "futures 0.3.31",
  "fuzzy",
