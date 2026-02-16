@@ -1,3 +1,4 @@
+use git_ui::patch_diff_view::PatchDiffView;
 use gpui::{AnyElement, Modifiers, WeakEntity};
 use markdown_preview::{
     OpenPreview as MarkdownOpenPreview, OpenPreviewToTheSide as MarkdownOpenPreviewToTheSide,
@@ -9,6 +10,7 @@ use svg_preview::{
 };
 use ui::{Tooltip, prelude::*, text_for_keystroke};
 use workspace::Workspace;
+use zed_actions::git::{PatchFileDiff, PatchFileDiffToTheSide};
 
 use super::QuickActionBar;
 
@@ -16,6 +18,7 @@ use super::QuickActionBar;
 enum PreviewType {
     Markdown,
     Svg,
+    PatchDiff,
 }
 
 impl QuickActionBar {
@@ -35,6 +38,9 @@ impl QuickActionBar {
                 } else if SvgPreviewView::resolve_active_item_as_svg_buffer(workspace, cx).is_some()
                 {
                     preview_type = Some(PreviewType::Svg);
+                } else if PatchDiffView::resolve_active_item_as_diff_editor(workspace, cx).is_some()
+                {
+                    preview_type = Some(PreviewType::PatchDiff)
                 }
             });
         }
@@ -56,6 +62,13 @@ impl QuickActionBar {
                     Box::new(SvgOpenPreview) as Box<dyn gpui::Action>,
                     Box::new(SvgOpenPreviewToTheSide) as Box<dyn gpui::Action>,
                     &svg_preview::OpenPreview as &dyn gpui::Action,
+                ),
+                PreviewType::PatchDiff => (
+                    "toggle-patch-diff-preview",
+                    "Preview Patch Diff",
+                    Box::new(PatchFileDiff) as Box<dyn gpui::Action>,
+                    Box::new(PatchFileDiffToTheSide) as Box<dyn gpui::Action>,
+                    &PatchFileDiff as &dyn gpui::Action,
                 ),
             };
 

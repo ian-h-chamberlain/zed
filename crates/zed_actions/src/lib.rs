@@ -269,8 +269,9 @@ pub mod git {
             /// Creates a pull request for the current branch.
             CreatePullRequest,
             /// Opens the current diff/patch file in a diff view.
-            // TODO: move out of git namepsace and view probably
-            PatchFileDiff
+            // TODO: move out of git namespace and git_ui crate
+            PatchFileDiff,
+            PatchFileDiffToTheSide,
         ]
     );
 }

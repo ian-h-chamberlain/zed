@@ -3,21 +3,23 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use editor::{Editor, EditorEvent, MultiBuffer, multibuffer_context_lines};
+use editor::{Editor, EditorEvent, EditorSettings, MultiBuffer, SplittableEditor};
 use gpui::prelude::*;
 use gpui::{Entity, EventEmitter, FocusHandle, Focusable, Task};
 use language::{Buffer, Capability};
 use project::Project;
+use settings::Settings as _;
 use ui::{AnyElement, App, Color, Icon, IconName, Label, LabelCommon as _, SharedString, Window};
-use workspace::item::{BreadcrumbText, ItemEvent, SaveOptions, TabContentParams};
+use workspace::item::{BreadcrumbText, ItemEvent, TabContentParams};
 use workspace::searchable::SearchableItemHandle;
 use workspace::{Item, ItemHandle as _, ItemNavHistory, ToolbarItemLocation, Workspace};
-use zed_actions::git::PatchFileDiff;
+use zed_actions::git::{PatchFileDiff, PatchFileDiffToTheSide};
 
 use super::patch_diff;
 
 pub struct PatchDiffView {
-    editor: Entity<Editor>,
+    editor: Entity<SplittableEditor>,
+    patch_filename: Option<String>,
     file_count: usize,
 }
 
@@ -32,6 +34,7 @@ impl PatchDiffView {
                 }
             }
         });
+        workspace.register_action(move |workspace, _: &PatchFileDiffToTheSide, window, cx| todo!());
     }
 
     pub fn resolve_active_item_as_diff_editor(
@@ -66,7 +69,6 @@ impl PatchDiffView {
     ) -> Task<Result<Entity<Self>>> {
         let project = workspace.project().clone();
         let workspace = workspace.weak_handle();
-        let context_lines = multibuffer_context_lines(cx);
         let patch_content = patch_buffer.read(cx).text();
         let patch_filename = patch_buffer
             .read(cx)
@@ -80,23 +82,28 @@ impl PatchDiffView {
                 let multibuffer = cx.new(|cx| {
                     let mut multibuffer = MultiBuffer::new(Capability::ReadOnly);
                     multibuffer.set_all_diff_hunks_expanded(cx);
-                    multibuffer.set_use_extended_diff_range(false, cx);
-
-                    if let Some(filename) = patch_filename {
-                        multibuffer.with_title(filename)
-                    } else {
-                        multibuffer
-                    }
+                    multibuffer
                 });
 
                 let file_count = patched_files.len();
-                for (path, (buffer, diff)) in patched_files {
-                    patch_diff::register_entry(&multibuffer, path, buffer, diff, context_lines, cx);
+                for (path, patched_file_diff) in patched_files {
+                    patch_diff::register_entry(&multibuffer, path, patched_file_diff, cx);
                 }
 
-                let diff_view = cx.new(|cx| {
-                    Self::new(multibuffer.clone(), project.clone(), file_count, window, cx)
-                });
+                let diff_view = {
+                    let workspace = cx.entity();
+                    cx.new(|cx| {
+                        Self::new(
+                            patch_filename.clone(),
+                            file_count,
+                            multibuffer,
+                            project,
+                            workspace,
+                            window,
+                            cx,
+                        )
+                    })
+                };
 
                 let pane = workspace.active_pane();
                 pane.update(cx, |pane, cx| {
@@ -109,27 +116,42 @@ impl PatchDiffView {
     }
 
     pub(crate) fn new(
+        patch_filename: Option<String>,
+        file_count: usize,
         multibuffer: Entity<MultiBuffer>,
         project: Entity<Project>,
-        file_count: usize,
+        workspace: Entity<Workspace>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(|cx| {
-            // TODO: SplittableEditor so we can view side-by-side
-            let mut editor =
-                Editor::for_multibuffer(multibuffer, Some(project.clone()), window, cx);
-            editor.start_temporary_diff_override();
-            editor.disable_diagnostics(cx);
-            editor.set_expand_all_diff_hunks(cx);
-            editor.set_render_diff_hunk_controls(
-                Arc::new(|_, _, _, _, _, _, _, _| gpui::Empty.into_any_element()),
+            let split_diff_editor = SplittableEditor::new(
+                EditorSettings::get_global(cx).diff_view_style,
+                multibuffer,
+                project,
+                workspace,
+                window,
                 cx,
             );
-            editor
+            split_diff_editor.rhs_editor().update(cx, |editor, cx| {
+                editor.set_delegate_open_excerpts(false);
+                editor.start_temporary_diff_override();
+                editor.disable_diagnostics(cx);
+                editor.set_expand_all_diff_hunks(cx);
+                editor.set_render_diff_hunk_controls(
+                    Arc::new(|_, _, _, _, _, _, _, _| gpui::Empty.into_any_element()),
+                    cx,
+                );
+            });
+
+            split_diff_editor
         });
 
-        Self { editor, file_count }
+        Self {
+            editor,
+            file_count,
+            patch_filename,
+        }
     }
 
     pub(crate) fn title(&self) -> SharedString {
@@ -138,7 +160,11 @@ impl PatchDiffView {
         } else {
             format!("{} files", self.file_count)
         };
-        format!("Patch Diff ({suffix})").into()
+        format!(
+            "{} ({suffix})",
+            self.patch_filename.as_deref().unwrap_or("Patch Diff")
+        )
+        .into()
     }
 }
 
@@ -192,11 +218,13 @@ impl Item for PatchDiffView {
         &'a self,
         type_id: TypeId,
         self_handle: &'a Entity<Self>,
-        _: &'a App,
+        cx: &'a App,
     ) -> Option<gpui::AnyEntity> {
         if type_id == TypeId::of::<Self>() {
             Some(self_handle.clone().into())
         } else if type_id == TypeId::of::<Editor>() {
+            Some(self.editor.read(cx).rhs_editor().clone().into())
+        } else if type_id == TypeId::of::<SplittableEditor>() {
             Some(self.editor.clone().into())
         } else {
             None
@@ -213,8 +241,10 @@ impl Item for PatchDiffView {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.editor.update(cx, |editor, _| {
-            editor.set_nav_history(Some(nav_history));
+        self.editor.update(cx, |editor, cx| {
+            editor
+                .rhs_editor()
+                .update(cx, |editor, _cx| editor.set_nav_history(Some(nav_history)));
         });
     }
 
@@ -245,21 +275,6 @@ impl Item for PatchDiffView {
         self.editor.update(cx, |editor, cx| {
             editor.added_to_workspace(workspace, window, cx)
         });
-    }
-
-    fn can_save(&self, cx: &App) -> bool {
-        self.editor.read(cx).can_save(cx)
-    }
-
-    fn save(
-        &mut self,
-        options: SaveOptions,
-        project: Entity<Project>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> gpui::Task<anyhow::Result<()>> {
-        self.editor
-            .update(cx, |editor, cx| editor.save(options, project, window, cx))
     }
 }
 

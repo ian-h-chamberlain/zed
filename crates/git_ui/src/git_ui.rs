@@ -13,7 +13,6 @@ use ui::{
 
 mod blame_ui;
 pub mod clone;
-mod patch_diff_view;
 
 use git::{
     repository::{Branch, Upstream, UpstreamTracking, UpstreamTrackingStatus},
@@ -46,7 +45,8 @@ mod git_panel_settings;
 pub mod git_picker;
 pub mod multi_diff_view;
 pub mod onboarding;
-pub mod patch_diff;
+mod patch_diff;
+pub mod patch_diff_view;
 pub mod picker_prompt;
 pub mod project_diff;
 pub(crate) mod remote_output;

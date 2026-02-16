@@ -2,9 +2,9 @@ use anyhow::Result;
 use buffer_diff::BufferDiff;
 use collections::BTreeMap;
 use edit_prediction::udiff::{DiffEvent, DiffParser as UdiffParser, FileStatus};
-use editor::MultiBuffer;
+use editor::{MultiBuffer, multibuffer_context_lines};
 use gpui::{App, AppContext as _, AsyncApp, Context, Entity};
-use language::{Buffer, Capability, DiskState, OffsetRangeExt, proto};
+use language::{Buffer, Capability, DiskState, proto};
 use multi_buffer::PathKey;
 use project::Project;
 use std::{
@@ -18,11 +18,17 @@ use util::{
 };
 use workspace::Workspace;
 
+pub struct PatchedFileDiff {
+    buffer: Entity<Buffer>,
+    diff: Entity<BufferDiff>,
+    hunk_context_sizes: BTreeMap<usize, usize>,
+}
+
 pub async fn load_entries<'a>(
     patch_content: String,
     project: &Entity<Project>,
     cx: &mut AsyncApp,
-) -> Result<BTreeMap<PathBuf, (Entity<Buffer>, Entity<BufferDiff>)>> {
+) -> Result<BTreeMap<PathBuf, PatchedFileDiff>> {
     let mut buffer_contents = BTreeMap::new();
     let mut patched_files = BTreeMap::new();
 
@@ -34,7 +40,6 @@ pub async fn load_entries<'a>(
         &patch_content
     };
 
-    // Parse the patch content into individual file entries
     let mut diff = UdiffParser::new(patch_content);
 
     let mut cur_file = None;
@@ -47,19 +52,19 @@ pub async fn load_entries<'a>(
             } => match status {
                 FileStatus::Modified => {
                     log::debug!("file {path:?} modified hunk: {hunk:#?}");
-                    let (old_contents, new_contents) = buffer_contents
+                    let (old_contents, new_contents, hunk_context_sizes) = buffer_contents
                         .entry(path.clone())
-                        .or_insert_with(|| (String::new(), String::new()));
+                        .or_insert_with(|| (String::new(), String::new(), BTreeMap::new()));
 
                     let start_line = hunk.start_line.unwrap_or_default() as usize;
-
                     let missing_lines = start_line.saturating_sub(old_contents.lines().count());
 
-                    old_contents.push_str(&"\n".repeat(missing_lines + 1));
+                    old_contents.push_str(&"\n".repeat(missing_lines));
                     old_contents.push_str(&hunk.context);
 
-                    new_contents.push_str(&"\n".repeat(missing_lines + 1));
+                    let mut edit_line_count = 0;
 
+                    new_contents.push_str(&"\n".repeat(missing_lines));
                     let mut char_offset = 0isize;
                     for mut edit in hunk.edits {
                         edit.range.start = edit.range.start.saturating_add_signed(char_offset);
@@ -69,8 +74,13 @@ pub async fn load_entries<'a>(
                             .saturating_sub_unsigned(edit.range.len());
 
                         hunk.context.replace_range(edit.range, &edit.text);
+                        edit_line_count += edit.text.lines().count();
                     }
                     new_contents.push_str(&hunk.context);
+
+                    let context_size = hunk.context.lines().count().saturating_sub(edit_line_count);
+                    hunk_context_sizes.insert(start_line, context_size);
+
                     cur_file = Some(path);
                 }
                 FileStatus::Created => {
@@ -79,11 +89,12 @@ pub async fn load_entries<'a>(
                         (
                             String::new(),
                             hunk.edits.into_iter().map(|edit| edit.text).collect(),
+                            BTreeMap::new(),
                         ),
                     );
                 }
                 FileStatus::Deleted => {
-                    buffer_contents.insert(path, (hunk.context, String::new()));
+                    buffer_contents.insert(path, (hunk.context, String::new(), BTreeMap::new()));
                 }
             },
             DiffEvent::FileEnd { renamed_to } => {
@@ -97,7 +108,7 @@ pub async fn load_entries<'a>(
         }
     }
 
-    for (path, (old_text, new_text)) in buffer_contents {
+    for (path, (old_text, new_text, hunk_context_sizes)) in buffer_contents {
         let new_text = new_text.clone();
 
         let language_registry = project.read_with(cx, |project, _cx| project.languages().clone());
@@ -152,7 +163,14 @@ pub async fn load_entries<'a>(
             .unwrap_or(&path);
 
         log::debug!("inserting {path:?} buffer diff");
-        patched_files.insert(path.to_path_buf(), (buffer, diff));
+        patched_files.insert(
+            path.to_path_buf(),
+            PatchedFileDiff {
+                buffer,
+                diff,
+                hunk_context_sizes,
+            },
+        );
     }
 
     Ok(patched_files)
@@ -161,21 +179,9 @@ pub async fn load_entries<'a>(
 pub fn register_entry(
     multibuffer: &Entity<MultiBuffer>,
     path: PathBuf,
-    buffer: Entity<Buffer>,
-    diff: Entity<BufferDiff>,
-    context_lines: u32,
+    patched_file: PatchedFileDiff,
     cx: &mut Context<Workspace>,
 ) {
-    let snapshot = buffer.read(cx).snapshot();
-    let diff_snapshot = diff.read(cx).snapshot(cx);
-
-    let ranges: Vec<_> = diff_snapshot
-        .hunks(&snapshot)
-        .map(|hunk| hunk.buffer_range.to_point(&snapshot))
-        .collect();
-
-    log::debug!("Collected ranges for diff hunks in {path:?}: {ranges:#?}");
-
     let path_key = PathKey::with_sort_prefix(
         0,
         RelPath::new(&path, PathStyle::local())
@@ -185,9 +191,24 @@ pub fn register_entry(
             .into(),
     );
 
+    let snapshot = patched_file.buffer.read(cx).snapshot();
+    let diff_snapshot = patched_file.diff.read(cx).snapshot(cx);
+    let ranges: Vec<_> = diff_snapshot
+        .hunks(&snapshot)
+        .map(|hunk| hunk.range)
+        .collect();
+
+    log::debug!("Collected ranges for diff hunks in {path:?}: {ranges:#?}");
+
     multibuffer.update(cx, |multibuffer, cx| {
-        multibuffer.set_excerpts_for_path(path_key, buffer, ranges, context_lines, cx);
-        multibuffer.add_diff(diff, cx);
+        multibuffer.set_excerpts_for_path(
+            path_key,
+            patched_file.buffer,
+            ranges,
+            multibuffer_context_lines(cx),
+            cx,
+        );
+        multibuffer.add_diff(patched_file.diff, cx);
     });
 }
 
