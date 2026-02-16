@@ -13,6 +13,7 @@ use ui::{
 
 mod blame_ui;
 pub mod clone;
+mod patch_diff_view;
 
 use git::{
     repository::{Branch, Upstream, UpstreamTracking, UpstreamTrackingStatus},
@@ -30,7 +31,7 @@ use ui::prelude::*;
 use workspace::{ModalView, Workspace, notifications::DetachAndPromptErr};
 use zed_actions;
 
-use crate::{git_panel::GitPanel, text_diff_view::TextDiffView};
+use crate::{git_panel::GitPanel, patch_diff_view::PatchDiffView, text_diff_view::TextDiffView};
 
 mod askpass_modal;
 pub mod branch_picker;
@@ -76,7 +77,7 @@ pub fn init(cx: &mut App) {
         ProjectDiff::register(workspace, cx);
         CommitModal::register(workspace);
         git_panel::register(workspace);
-        patch_diff::register(workspace, cx);
+        PatchDiffView::register(workspace, cx);
         repository_selector::register(workspace);
         git_picker::register(workspace);
 
