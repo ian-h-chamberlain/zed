@@ -1,7 +1,9 @@
 use anyhow::Result;
 use buffer_diff::BufferDiff;
+use collections::BTreeMap;
 use edit_prediction::udiff::{DiffEvent, DiffParser as UdiffParser, FileStatus};
 use editor::{Editor, EditorEvent, MultiBuffer, multibuffer_context_lines};
+use futures::FutureExt;
 use gpui::{
     AnyElement, App, AppContext as _, AsyncApp, Context, Entity, EventEmitter, FocusHandle,
     Focusable, IntoElement, Render, SharedString, Task, Window,
@@ -15,8 +17,11 @@ use std::{
     sync::Arc,
 };
 use ui::{Color, Icon, IconName, Label, LabelCommon as _};
-use util::paths::PathStyle;
-use util::rel_path::RelPath;
+use util::{
+    ResultExt,
+    paths::PathStyle,
+    rel_path::{RelPath, RelPathBuf},
+};
 use workspace::{
     Item, ItemHandle as _, ItemNavHistory, ToolbarItemLocation, Workspace,
     item::{BreadcrumbText, ItemEvent, SaveOptions, TabContentParams},
@@ -24,345 +29,170 @@ use workspace::{
 };
 use zed_actions::git::PatchFileDiff;
 
-/// Represents a parsed file from a patch
-struct ParsedPatchFile {
-    old_path: String,
-    new_path: String,
-    hunks: Vec<PatchHunk>,
-    status: FileStatus,
-}
-
-// TODO: maybe can reuse Hunk, DiffLine, etc. from udiff.
-// Possibly move to a new crate or put in buffer_diff or something?
-/// Represents a hunk (change section) in a patch file
-struct PatchHunk {
-    old_start: usize,
-    old_count: usize,
-    new_start: usize,
-    new_count: usize,
-    lines: Vec<PatchLine>,
-}
-
-/// Represents a line in a patch
-enum PatchLine {
-    Context(String),
-    Addition(String),
-    Deletion(String),
-}
-
-/// Parse a unified diff patch into individual file entries using udiff parser
-fn parse_unified_diff(patch_content: &str) -> Result<Vec<ParsedPatchFile>> {
-    let mut files = Vec::new();
-    let mut diff = UdiffParser::new(patch_content);
-    let mut current_file: Option<ParsedPatchFile> = None;
-
-    while let Some(event) = diff.next()? {
-        match event {
-            DiffEvent::Hunk { path, hunk, status } => {
-                // Get or create the current file entry
-                let file = current_file.get_or_insert_with(|| ParsedPatchFile {
-                    old_path: path.to_string(),
-                    new_path: path.to_string(),
-                    hunks: Vec::new(),
-                    status,
-                });
-
-                // Build PatchHunk and lines from udiff::Hunk
-                let context_lines_str: Vec<&str> = hunk.context.lines().collect();
-                let mut lines = Vec::new();
-
-                // Interleave context and edits to reconstruct original diff order
-                let mut context_idx = 0;
-                for edit in &hunk.edits {
-                    // Add any context lines before this edit
-                    while context_idx < edit.range.start {
-                        if context_idx < context_lines_str.len() {
-                            lines.push(PatchLine::Context(
-                                context_lines_str[context_idx].to_string(),
-                            ));
-                        }
-                        context_idx += 1;
-                    }
-
-                    // Add deletion (empty text means deletion)
-                    if edit.text.is_empty() {
-                        if context_idx < context_lines_str.len() {
-                            lines.push(PatchLine::Deletion(
-                                context_lines_str[context_idx].to_string(),
-                            ));
-                            context_idx += 1;
-                        }
-                    } else {
-                        // Add addition (non-empty text)
-                        for add_line in edit.text.lines() {
-                            lines.push(PatchLine::Addition(add_line.to_string()));
-                        }
-                    }
-                }
-
-                // Add remaining context lines
-                while context_idx < context_lines_str.len() {
-                    lines.push(PatchLine::Context(
-                        context_lines_str[context_idx].to_string(),
-                    ));
-                    context_idx += 1;
-                }
-
-                let context_count = context_lines_str.len();
-                let deletion_count = hunk.edits.iter().filter(|e| e.text.is_empty()).count();
-                let addition_count: usize = hunk
-                    .edits
-                    .iter()
-                    .filter(|e| !e.text.is_empty())
-                    .map(|e| e.text.lines().count())
-                    .sum();
-
-                let patch_hunk = PatchHunk {
-                    old_start: hunk.start_line.map(|l| l as usize).unwrap_or(1),
-                    old_count: context_count + deletion_count,
-                    new_start: hunk.start_line.map(|l| l as usize).unwrap_or(1),
-                    new_count: context_count + addition_count,
-                    lines,
-                };
-                file.hunks.push(patch_hunk);
-                file.status = status;
-            }
-            DiffEvent::FileEnd { renamed_to } => {
-                if let Some(mut file) = current_file.take() {
-                    if let Some(new_path) = renamed_to {
-                        file.new_path = new_path.to_string();
-                    }
-                    files.push(file);
-                }
-            }
-        }
-    }
-
-    // Handle any remaining file
-    if let Some(file) = current_file {
-        files.push(file);
-    }
-
-    Ok(files)
-}
-
-fn common_prefix(paths: &[PathBuf]) -> Option<PathBuf> {
-    let mut iter = paths.iter();
-    let mut prefix = iter.next()?.clone();
-
-    for path in iter {
-        while !path.starts_with(&prefix) {
-            if !prefix.pop() {
-                return Some(PathBuf::new());
-            }
-        }
-    }
-
-    Some(prefix)
-}
-
 pub struct PatchDiffView {
     editor: Entity<Editor>,
     file_count: usize,
 }
 
-struct Entry {
-    index: usize,
-    new_path: PathBuf,
-    new_buffer: Entity<Buffer>,
-    diff: Entity<BufferDiff>,
-}
-
-async fn load_entries_from_patch(
+async fn load_entries_from_patch<'a>(
     patch_content: String,
     project: &Entity<Project>,
     cx: &mut AsyncApp,
-) -> Result<(Vec<Entry>, Option<PathBuf>)> {
-    let mut entries = Vec::new();
-    let mut all_paths = Vec::new();
+) -> Result<BTreeMap<PathBuf, (Entity<Buffer>, Entity<BufferDiff>)>> {
+    let mut buffer_contents = BTreeMap::new();
+    let mut patched_files = BTreeMap::new();
+
+    // Trim off RFC 3676 signature (like `git format-patch` produces).
+    // Could consider moving this logic into udiff parser, but maybe less risky here
+    let patch_content = if let Some(trailing_sig) = patch_content.rfind("-- \n") {
+        &patch_content[..trailing_sig]
+    } else {
+        &patch_content
+    };
 
     // Parse the patch content into individual file entries
-    let parsed_files = parse_unified_diff(&patch_content)?;
+    let mut diff = UdiffParser::new(patch_content);
 
-    for (index, parsed_file) in parsed_files.into_iter().enumerate() {
-        // Use the new path for the file, or fall back to old path
-        let file_path = if parsed_file.status != FileStatus::Deleted {
-            PathBuf::from(&parsed_file.new_path)
-        } else {
-            PathBuf::from(&parsed_file.old_path)
-        };
+    let mut cur_file = None;
+    while let Ok(Some(evt)) = diff.next() {
+        match evt {
+            DiffEvent::Hunk {
+                path,
+                mut hunk,
+                status,
+            } => match status {
+                FileStatus::Modified => {
+                    log::debug!("file {path:?} modified hunk: {hunk:#?}");
+                    let (old_contents, new_contents) = buffer_contents
+                        .entry(path.clone())
+                        .or_insert_with(|| (String::new(), String::new()));
 
-        // Reconstruct the file content from the hunks
-        let (buffer_content, base_content) = reconstruct_file_content(&parsed_file);
+                    let start_line = hunk.start_line.unwrap_or_default() as usize;
 
-        // Create a buffer with the reconstructed file content
+                    let missing_lines = start_line.saturating_sub(old_contents.lines().count());
+
+                    old_contents.push_str(&"\n".repeat(missing_lines + 1));
+                    old_contents.push_str(&hunk.context);
+
+                    new_contents.push_str(&"\n".repeat(missing_lines + 1));
+
+                    let mut char_offset = 0isize;
+                    for mut edit in hunk.edits {
+                        edit.range.start = edit.range.start.saturating_add_signed(char_offset);
+                        edit.range.end = edit.range.end.saturating_add_signed(char_offset);
+                        char_offset = char_offset
+                            .saturating_add_unsigned(edit.text.len())
+                            .saturating_sub_unsigned(edit.range.len());
+
+                        hunk.context.replace_range(edit.range, &edit.text);
+                    }
+                    new_contents.push_str(&hunk.context);
+                    cur_file = Some(path);
+                }
+                FileStatus::Created => {
+                    buffer_contents.insert(
+                        path,
+                        (
+                            String::new(),
+                            hunk.edits.into_iter().map(|edit| edit.text).collect(),
+                        ),
+                    );
+                }
+                FileStatus::Deleted => {
+                    buffer_contents.insert(path, (hunk.context, String::new()));
+                }
+            },
+            DiffEvent::FileEnd { renamed_to } => {
+                if let Some(new_name) = renamed_to
+                    && let Some(path) = cur_file.take()
+                    && let Some(entry) = buffer_contents.remove(&path)
+                {
+                    buffer_contents.insert(new_name, entry);
+                }
+            }
+        }
+    }
+
+    for (path, (old_text, new_text)) in buffer_contents {
+        let new_text = new_text.clone();
+
+        let language = project.read_with(cx, |project, cx| {
+            project
+                .languages()
+                .load_language_for_file_path(Path::new(path.as_ref()))
+                .now_or_never()
+                .and_then(|result| result.log_err())
+        });
+
         let buffer = project.update(cx, |project, cx| {
             project.buffer_store().update(cx, |buffer_store, cx| {
-                buffer_store.create_local_buffer(buffer_content.as_str(), None, false, cx)
+                buffer_store.create_local_buffer(&new_text, language.clone(), false, cx)
             })
         });
 
-        // Create a buffer diff for this file
-        let diff = build_file_buffer_diff(&parsed_file, &buffer, base_content, cx).await?;
+        let snapshot = buffer.read_with(cx, |buffer, _cx| buffer.snapshot());
 
-        all_paths.push(file_path.clone());
-        entries.push(Entry {
-            index,
-            new_path: file_path,
-            new_buffer: buffer.clone(),
-            diff,
-        });
+        let diff = cx.new(|cx| BufferDiff::new(&snapshot, cx));
+        let update = diff
+            .update(cx, |diff, cx| {
+                diff.update_diff(
+                    snapshot.text.clone(),
+                    Some(old_text.into()),
+                    Some(false),
+                    language,
+                    cx,
+                )
+            })
+            .await;
+
+        diff.update(cx, |diff, cx| diff.set_snapshot(update, &snapshot, cx))
+            .await;
+
+        // assume -p1 for now, not sure if anything else needs to be supported
+        let path = PathBuf::from(path.as_ref());
+        let path = path
+            .strip_prefix(path.iter().next().unwrap_or_default())
+            .unwrap_or(&path);
+
+        log::debug!("inserting {path:?} buffer diff");
+        patched_files.insert(path.to_path_buf(), (buffer, diff));
     }
 
-    let common_root = common_prefix(&all_paths);
-    Ok((entries, common_root))
-}
-
-/// Reconstruct the file content from parsed patch hunks
-/// Returns:
-/// - buffer_content: the actual file content (new version without +/- markers)
-/// - base_content: the original file content before the patch was applied
-fn reconstruct_file_content(parsed_file: &ParsedPatchFile) -> (String, String) {
-    let mut buffer_content = String::new();
-    let mut base_content = String::new();
-
-    // Track line numbers to properly reconstruct the file
-    let mut old_line = 1;
-    let mut new_line = 1;
-
-    for hunk in &parsed_file.hunks {
-        // Add context lines before the hunk starts (in the old file)
-        let context_before = hunk.old_start.saturating_sub(old_line);
-        if context_before > 0 {
-            // We don't have the actual context lines, so we'll use empty lines
-            for _ in 0..context_before {
-                buffer_content.push('\n');
-                base_content.push('\n');
-                old_line += 1;
-                new_line += 1;
-            }
-        }
-
-        // Process hunk lines
-        for line in &hunk.lines {
-            match line {
-                PatchLine::Context(content) => {
-                    buffer_content.push_str(content);
-                    buffer_content.push('\n');
-                    base_content.push_str(content);
-                    base_content.push('\n');
-                    old_line += 1;
-                    new_line += 1;
-                }
-                PatchLine::Addition(content) => {
-                    // Addition: only in new file
-                    buffer_content.push_str(content);
-                    buffer_content.push('\n');
-                    new_line += 1;
-                }
-                PatchLine::Deletion(content) => {
-                    // Deletion: only in old file (base)
-                    base_content.push_str(content);
-                    base_content.push('\n');
-                    old_line += 1;
-                }
-            }
-        }
-    }
-
-    (buffer_content, base_content)
-}
-
-/// Build a buffer diff for a specific file from parsed patch data
-async fn build_file_buffer_diff(
-    parsed_file: &ParsedPatchFile,
-    buffer: &Entity<Buffer>,
-    base_content: String,
-    cx: &mut AsyncApp,
-) -> Result<Entity<BufferDiff>> {
-    // The buffer already contains the reconstructed file content
-    // (set in load_entries_from_patch)
-    let buffer_snapshot = buffer.read_with(cx, |buffer, _| buffer.snapshot());
-
-    // Create a buffer diff for this specific file
-    // Pass base_content as the original file content so the diff can compute changes
-    let _parsed_file = parsed_file; // Suppress unused warning for now
-    let diff = cx.new(|cx| BufferDiff::new(&buffer_snapshot, cx));
-
-    let update = diff
-        .update(cx, |diff, cx| {
-            diff.update_diff(
-                buffer_snapshot.text.clone(),
-                Some(Arc::from(base_content)),
-                Some(false),
-                buffer_snapshot.language().cloned(),
-                cx,
-            )
-        })
-        .await;
-
-    diff.update(cx, |diff, cx| {
-        diff.set_snapshot(update, &buffer_snapshot, cx)
-    })
-    .await;
-
-    Ok(diff)
+    Ok(patched_files)
 }
 
 fn register_entry(
     multibuffer: &Entity<MultiBuffer>,
-    entry: Entry,
-    common_root: &Option<PathBuf>,
+    path: PathBuf,
+    buffer: Entity<Buffer>,
+    diff: Entity<BufferDiff>,
     context_lines: u32,
     cx: &mut Context<Workspace>,
 ) {
-    let snapshot = entry.new_buffer.read(cx).snapshot();
-    let diff_snapshot = entry.diff.read(cx).snapshot(cx);
+    let snapshot = buffer.read(cx).snapshot();
+    let diff_snapshot = diff.read(cx).snapshot(cx);
 
-    let ranges: Vec<std::ops::Range<language::Point>> = diff_snapshot
+    let ranges: Vec<_> = diff_snapshot
         .hunks(&snapshot)
         .map(|hunk| hunk.buffer_range.to_point(&snapshot))
         .collect();
 
-    let display_rel = common_root
-        .as_ref()
-        .and_then(|root| entry.new_path.strip_prefix(root).ok())
-        .map(|rel| {
-            RelPath::new(rel, PathStyle::local())
-                .map(|r| r.into_owned().into())
-                .unwrap_or_else(|_| {
-                    RelPath::new(Path::new("untitled"), PathStyle::Posix)
-                        .unwrap()
-                        .into_owned()
-                        .into()
-                })
-        })
-        .unwrap_or_else(|| {
-            entry
-                .new_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .and_then(|s| RelPath::new(Path::new(s), PathStyle::Posix).ok())
-                .map(|r| r.into_owned().into())
-                .unwrap_or_else(|| {
-                    RelPath::new(Path::new("untitled"), PathStyle::Posix)
-                        .unwrap()
-                        .into_owned()
-                        .into()
-                })
-        });
+    log::debug!("Collected ranges for diff hunks: {ranges:#?}");
 
-    let path_key = PathKey::with_sort_prefix(entry.index as u64, display_rel);
+    // TODO maybe sort by the order they appear in patch file
+    // also not sure if windows path styles are supported in diffs but let's just assume POSIX for now
+    let path_key = PathKey::with_sort_prefix(
+        0,
+        RelPath::new(&path, PathStyle::Posix)
+            .log_err()
+            .map(|path| path.to_rel_path_buf())
+            .unwrap_or_else(RelPathBuf::new)
+            .into(),
+    );
 
     multibuffer.update(cx, |multibuffer, cx| {
-        multibuffer.set_excerpts_for_path(
-            path_key,
-            entry.new_buffer.clone(),
-            ranges,
-            context_lines,
-            cx,
-        );
-        multibuffer.add_diff(entry.diff.clone(), cx);
+        multibuffer.set_excerpts_for_path(path_key, buffer, ranges, context_lines, cx);
+        multibuffer.add_diff(diff, cx);
     });
 }
 
@@ -419,19 +249,18 @@ impl PatchDiffView {
         let context_lines = multibuffer_context_lines(cx);
 
         window.spawn(cx, async move |cx| {
-            let (entries, common_root) =
-                load_entries_from_patch(patch_content, &project, cx).await?;
+            let patched_files = load_entries_from_patch(patch_content, &project, cx).await?;
 
             workspace.update_in(cx, |workspace, window, cx| {
                 let multibuffer = cx.new(|cx| {
-                    let mut multibuffer = MultiBuffer::new(Capability::ReadWrite);
+                    let mut multibuffer = MultiBuffer::new(Capability::ReadOnly);
                     multibuffer.set_all_diff_hunks_expanded(cx);
                     multibuffer
                 });
 
-                let file_count = entries.len();
-                for entry in entries {
-                    register_entry(&multibuffer, entry, &common_root, context_lines, cx);
+                let file_count = patched_files.len();
+                for (path, (buffer, diff)) in patched_files {
+                    register_entry(&multibuffer, path, buffer, diff, context_lines, cx);
                 }
 
                 let diff_view = cx.new(|cx| {
@@ -461,6 +290,7 @@ impl PatchDiffView {
         cx: &mut Context<Self>,
     ) -> Self {
         let editor = cx.new(|cx| {
+            // TODO: SplittableEditor so we can view side-by-side
             let mut editor =
                 Editor::for_multibuffer(multibuffer, Some(project.clone()), window, cx);
             editor.start_temporary_diff_override();
