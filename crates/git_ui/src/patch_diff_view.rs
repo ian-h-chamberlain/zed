@@ -5,7 +5,7 @@ use anyhow::Result;
 
 use editor::{Editor, EditorEvent, EditorSettings, MultiBuffer, SplittableEditor};
 use gpui::prelude::*;
-use gpui::{Entity, EventEmitter, FocusHandle, Focusable, Task};
+use gpui::{Entity, EventEmitter, FocusHandle, Focusable, Task, WeakEntity};
 use language::{Buffer, Capability};
 use project::Project;
 use settings::Settings as _;
@@ -34,7 +34,26 @@ impl PatchDiffView {
                 }
             }
         });
-        workspace.register_action(move |workspace, _: &PatchFileDiffToTheSide, window, cx| todo!());
+        workspace.register_action(move |workspace, _: &PatchFileDiffToTheSide, window, cx| {
+            if let Some(editor) = Self::resolve_active_item_as_diff_editor(workspace, cx) {
+                let buffer = editor.read(cx).buffer().read(cx);
+                if let Some(buffer) = buffer.as_singleton() {
+                    let pane = workspace
+                        .find_pane_in_direction(workspace::SplitDirection::Right, cx)
+                        .unwrap_or_else(|| {
+                            workspace.split_pane(
+                                workspace.active_pane().clone(),
+                                workspace::SplitDirection::Right,
+                                window,
+                                cx,
+                            )
+                        });
+                    let weak_pane = pane.downgrade();
+                    let task = Self::open_to_pane(buffer, weak_pane, workspace, window, cx);
+                    task.detach();
+                }
+            }
+        });
     }
 
     pub fn resolve_active_item_as_diff_editor(
@@ -109,6 +128,62 @@ impl PatchDiffView {
                 pane.update(cx, |pane, cx| {
                     pane.add_item(Box::new(diff_view.clone()), true, true, None, window, cx);
                 });
+
+                diff_view
+            })
+        })
+    }
+
+    pub fn open_to_pane(
+        patch_buffer: Entity<Buffer>,
+        pane: WeakEntity<workspace::Pane>,
+        workspace: &Workspace,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Task<Result<Entity<Self>>> {
+        let project = workspace.project().clone();
+        let workspace = workspace.weak_handle();
+        let patch_content = patch_buffer.read(cx).text();
+        let patch_filename = patch_buffer
+            .read(cx)
+            .file()
+            .map(|file| file.file_name(cx).to_string());
+
+        window.spawn(cx, async move |cx| {
+            let patched_files = patch_diff::load_entries(patch_content, &project, cx).await?;
+
+            workspace.update_in(cx, |_workspace, window, cx| {
+                let multibuffer = cx.new(|cx| {
+                    let mut multibuffer = MultiBuffer::new(Capability::ReadOnly);
+                    multibuffer.set_all_diff_hunks_expanded(cx);
+                    multibuffer
+                });
+
+                let file_count = patched_files.len();
+                for (path, patched_file_diff) in patched_files {
+                    patch_diff::register_entry(&multibuffer, path, patched_file_diff, cx);
+                }
+
+                let diff_view = {
+                    let workspace = cx.entity();
+                    cx.new(|cx| {
+                        Self::new(
+                            patch_filename.clone(),
+                            file_count,
+                            multibuffer,
+                            project,
+                            workspace,
+                            window,
+                            cx,
+                        )
+                    })
+                };
+
+                if let Some(pane) = pane.upgrade() {
+                    pane.update(cx, |pane, cx| {
+                        pane.add_item(Box::new(diff_view.clone()), false, false, None, window, cx);
+                    });
+                }
 
                 diff_view
             })
